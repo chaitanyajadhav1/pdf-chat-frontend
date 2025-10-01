@@ -1,494 +1,1393 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Send, Upload, Package, FileText, User, LogOut, Loader2, X, CheckCircle, AlertCircle, Paperclip, FileCheck } from 'lucide-react';
+import React, { useState, useRef, useEffect, ChangeEvent, SyntheticEvent } from 'react';
+import {
+  Box,
+  Container,
+  Typography,
+  Paper,
+  TextField,
+  Button,
+  AppBar,
+  Toolbar,
+  IconButton,
+  Drawer,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Chip,
+  Card,
+  CardContent,
+  Alert,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
+  Tabs,
+  Tab,
+  Avatar,
+  Divider,
+  Fab,
+  ListItemButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Badge,
+  LinearProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+} from '@mui/material';
+import Grid from '@mui/material/Grid';
+import {
+  Menu as MenuIcon,
+  Upload as UploadIcon,
+  LocalShipping as ShippingIcon,
+  Description as DocumentIcon,
+  TrackChanges as TrackIcon,
+  Receipt as InvoiceIcon,
+  Chat as ChatIcon,
+  Send as SendIcon,
+  CheckCircle as CheckCircleIcon,
+  Person as PersonIcon,
+  Logout as LogoutIcon,
+  Dashboard as DashboardIcon,
+  CloudUpload as CloudUploadIcon,
+  ExpandMore as ExpandMoreIcon,
+  Storage as StorageIcon,
+  Refresh as RefreshIcon,
+  Visibility as VisibilityIcon,
+} from '@mui/icons-material';
 
-const API_URL = 'http://localhost:8000';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-  attachments?: any[];
-  showUploadPrompt?: boolean;
+// Types
+interface User {
+  userId: string;
+  name: string;
+  email?: string;
+  createdAt: string;
+  lastAccessed: string;
 }
 
+interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+}
+
+interface ShipmentData {
+  origin?: string;
+  destination?: string;
+  cargo?: string;
+  weight?: string;
+  serviceLevel?: string;
+  specialRequirements?: string;
+  declaredValue?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  invoices?: Invoice[];
+}
+
+interface Quote {
+  carrierId: string;
+  name: string;
+  service: string;
+  rate: string;
+  transitTime: string;
+  reputation: number;
+  reliability: string;
+  estimatedDelivery: string;
+  currency: string;
+}
+
+interface QuoteResponse {
+  quotes: Quote[];
+  recommendedQuote: Quote;
+  totalEstimate: string;
+  currency: string;
+}
+
+interface AgentResponse {
+  success: boolean;
+  threadId: string;
+  message: string;
+  currentPhase: string;
+  shipmentData: ShipmentData;
+  quote?: QuoteResponse;
+  completed: boolean;
+  nextAction?: string;
+  invoices?: Invoice[];
+  error?: string;
+}
+
+interface Invoice {
+  invoiceId: string;
+  filename: string;
+  uploadedAt: string;
+  processed: boolean;
+  extractedData?: any;
+  documentType?: string;
+}
+
+interface Document {
+  document_id: string;
+  filename: string;
+  uploaded_at: string;
+  strategy: string;
+  collection_name: string;
+}
+
+interface Shipment {
+  tracking_number: string;
+  booking_id: string;
+  status: string;
+  origin: string;
+  destination: string;
+  carrier_id: string;
+  estimated_delivery: string;
+  created_at: string;
+}
+
+interface AuthData {
+  userId: string;
+  name: string;
+  email: string;
+}
+
+interface SnackbarState {
+  open: boolean;
+  message: string;
+  severity: 'success' | 'error' | 'warning' | 'info';
+}
+
+interface TrackingInfo {
+  trackingNumber: string;
+  status: string;
+  origin: string;
+  destination: string;
+  estimatedDelivery: string;
+  currentLocation?: string;
+}
+
+interface RedisInvoiceMetadata {
+  invoiceId: string;
+  filename: string;
+  documentType: string;
+  invoiceNumber?: string;
+  totalAmount?: number;
+  currency?: string;
+  processedAt: string;
+  readyForBooking?: boolean;
+}
+
+interface RedisDocumentMetadata {
+  documentId: string;
+  filename: string;
+  documentType: string;
+  processedAt: string;
+}
+
+interface RedisInvoiceData {
+  invoiceId: string;
+  userId: string;
+  sessionId?: string;
+  bookingId?: string;
+  filename: string;
+  fileSize: number;
+  totalPages: number;
+  analysis: any;
+  processedAt: string;
+  version: string;
+}
+
+interface RedisDocumentData {
+  documentId: string;
+  userId: string;
+  filename: string;
+  collectionName: string;
+  strategy: string;
+  fileSize: number;
+  totalPages: number;
+  totalChunks: number;
+  aiAnalysis: any;
+  processedAt: string;
+  version: string;
+}
+
+// API base URLs - moved outside component
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const WORKER_BASE = process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:8001';
+
 export default function FreightChatPro() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userId, setUserId] = useState('');
-  const [token, setToken] = useState('');
-  const [userName, setUserName] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [currentPhase, setCurrentPhase] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [showUploadUI, setShowUploadUI] = useState(false);
-  const [shipmentData, setShipmentData] = useState<any>({});
+  const [mounted, setMounted] = useState(false);
+  const [activeTab, setActiveTab] = useState<number>(0);
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const [authDialogOpen, setAuthDialogOpen] = useState<boolean>(false);
+  const [isLogin, setIsLogin] = useState<boolean>(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [snackbar, setSnackbar] = useState<SnackbarState>({ 
+    open: false, 
+    message: '', 
+    severity: 'success' 
+  });
+
+  const [agentThreadId, setAgentThreadId] = useState<string | null>(null);
+  const [agentMessages, setAgentMessages] = useState<Message[]>([]);
+  const [agentInput, setAgentInput] = useState<string>('');
+  const [agentLoading, setAgentLoading] = useState<boolean>(false);
+  const [currentPhase, setCurrentPhase] = useState<string>('greeting');
+  const [shipmentData, setShipmentData] = useState<ShipmentData>({});
+  const [quote, setQuote] = useState<QuoteResponse | null>(null);
+
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [documentUploading, setDocumentUploading] = useState<boolean>(false);
+  const [documentChatInput, setDocumentChatInput] = useState<string>('');
+  const [documentChatLoading, setDocumentChatLoading] = useState<boolean>(false);
+  const [documentChatResponse, setDocumentChatResponse] = useState<string>('');
+
+  const [trackingNumber, setTrackingNumber] = useState<string>('');
+  const [trackingInfo, setTrackingInfo] = useState<TrackingInfo | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState<boolean>(false);
+  const [userShipments, setUserShipments] = useState<Shipment[]>([]);
+
+  const [invoiceUploading, setInvoiceUploading] = useState<boolean>(false);
+  const [sessionInvoices, setSessionInvoices] = useState<Invoice[]>([]);
+
+  const [redisInvoices, setRedisInvoices] = useState<RedisInvoiceMetadata[]>([]);
+  const [redisDocuments, setRedisDocuments] = useState<RedisDocumentMetadata[]>([]);
+  const [selectedInvoiceData, setSelectedInvoiceData] = useState<RedisInvoiceData | null>(null);
+  const [selectedDocumentData, setSelectedDocumentData] = useState<RedisDocumentData | null>(null);
+  const [redisLoading, setRedisLoading] = useState<boolean>(false);
+  const [invoiceDialogOpen, setInvoiceDialogOpen] = useState<boolean>(false);
+  const [documentDialogOpen, setDocumentDialogOpen] = useState<boolean>(false);
+
+  const [authData, setAuthData] = useState<AuthData>({
+    userId: '',
+    name: '',
+    email: ''
+  });
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle client-side mounting
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [agentMessages]);
 
-  const handleAuth = async (isLogin: boolean) => {
+  useEffect(() => {
+    if (!mounted) return;
+
+    const savedToken = sessionStorage.getItem('freightchat_token');
+    const savedUser = sessionStorage.getItem('freightchat_user');
+    
+    if (savedToken && savedUser) {
+      setToken(savedToken);
+      const userData = JSON.parse(savedUser);
+      setUser(userData);
+      fetchUserProfile(savedToken);
+      fetchUserDocuments(savedToken);
+      fetchUserShipments(savedToken);
+      fetchRedisData(userData.userId);
+    }
+  }, [mounted]);
+
+  const fetchRedisData = async (userId: string): Promise<void> => {
+    setRedisLoading(true);
     try {
-      const endpoint = isLogin ? '/auth/login' : '/auth/register';
-      const payload: any = { userId };
-      if (!isLogin) payload.name = userName || userId;
-
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setToken(data.token);
-        setUserName(data.user.name);
-        setIsAuthenticated(true);
-        setDocuments(data.user?.documents || []);
-      } else {
-        alert(data.error || 'Authentication failed');
+      const invoicesResponse = await fetch(`${WORKER_BASE}/api/user/${userId}/invoices`);
+      if (invoicesResponse.ok) {
+        const invoicesData = await invoicesResponse.json();
+        setRedisInvoices(invoicesData.invoices || []);
       }
-    } catch {
-      alert('Connection error. Please try again.');
+
+      const documentsResponse = await fetch(`${WORKER_BASE}/api/user/${userId}/documents`);
+      if (documentsResponse.ok) {
+        const documentsData = await documentsResponse.json();
+        setRedisDocuments(documentsData.documents || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch Redis data:', error);
+    } finally {
+      setRedisLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setToken('');
-    setUserId('');
-    setUserName('');
-    setMessages([]);
-    setThreadId(null);
-    setDocuments([]);
-    setSelectedFile(null);
-    setShowUploadUI(false);
+  const fetchInvoiceDetails = async (invoiceId: string): Promise<void> => {
+    try {
+      const response = await fetch(`${WORKER_BASE}/api/invoice/${invoiceId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedInvoiceData(data);
+        setInvoiceDialogOpen(true);
+      } else {
+        setSnackbar({ open: true, message: 'Failed to fetch invoice details', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to fetch invoice details', severity: 'error' });
+    }
   };
 
-  const startShippingSession = async () => {
+  const fetchDocumentDetails = async (documentId: string): Promise<void> => {
     try {
-      setLoading(true);
-      const response = await fetch(`${API_URL}/agent/shipping/start`, {
+      const response = await fetch(`${WORKER_BASE}/api/document/${documentId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedDocumentData(data);
+        setDocumentDialogOpen(true);
+      } else {
+        setSnackbar({ open: true, message: 'Failed to fetch document details', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to fetch document details', severity: 'error' });
+    }
+  };
+
+  const refreshRedisData = async (): Promise<void> => {
+    if (user) {
+      await fetchRedisData(user.userId);
+      setSnackbar({ open: true, message: 'Redis data refreshed', severity: 'success' });
+    }
+  };
+
+  const handleAuth = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const endpoint = isLogin ? '/auth/login' : '/auth/register';
+      const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authData)
       });
 
       const data = await response.json();
+
       if (response.ok) {
-        setThreadId(data.threadId);
-        setCurrentPhase(data.currentPhase);
-        setMessages([{ role: 'assistant', content: data.message, timestamp: new Date().toISOString() }]);
+        setToken(data.token);
+        setUser(data.user);
+        sessionStorage.setItem('freightchat_token', data.token);
+        sessionStorage.setItem('freightchat_user', JSON.stringify(data.user));
+        setAuthDialogOpen(false);
+        setSnackbar({ open: true, message: `Welcome ${data.user.name}!`, severity: 'success' });
+        
+        fetchUserProfile(data.token);
+        fetchUserDocuments(data.token);
+        fetchUserShipments(data.token);
+        fetchRedisData(data.user.userId);
       } else {
-        alert(data.error || 'Failed to start session');
+        setSnackbar({ open: true, message: data.error, severity: 'error' });
       }
-    } catch {
-      alert('Failed to connect to agent');
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Authentication failed', severity: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFileUpload = async () => {
-    if (!selectedFile) return;
+  const fetchUserProfile = async (userToken: string): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/profile`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user);
+        setDocuments(data.documents || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+    }
+  };
+
+  const fetchUserDocuments = async (userToken: string): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/profile`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data.documents || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch documents:', error);
+    }
+  };
+
+  const fetchUserShipments = async (userToken: string): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/shipments`, {
+        headers: { 'Authorization': `Bearer ${userToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUserShipments(data.recentShipments || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch shipments:', error);
+    }
+  };
+
+  const handleLogout = (): void => {
+    setUser(null);
+    setToken(null);
+    setAgentThreadId(null);
+    setAgentMessages([]);
+    setRedisInvoices([]);
+    setRedisDocuments([]);
+    sessionStorage.removeItem('freightchat_token');
+    sessionStorage.removeItem('freightchat_user');
+    setSnackbar({ open: true, message: 'Logged out successfully', severity: 'success' });
+  };
+
+  const startAgent = async (): Promise<void> => {
+    if (!token) {
+      setAuthDialogOpen(true);
+      return;
+    }
+
+    setAgentLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/agent/shipping/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data: AgentResponse = await response.json();
+
+      if (data.success) {
+        setAgentThreadId(data.threadId);
+        setAgentMessages([{
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date().toISOString()
+        }]);
+        setCurrentPhase(data.currentPhase);
+        setActiveTab(0);
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Failed to start agent', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to start agent', severity: 'error' });
+    } finally {
+      setAgentLoading(false);
+    }
+  };
+
+  const sendAgentMessage = async (): Promise<void> => {
+    if (!agentInput.trim() || !agentThreadId || !token) return;
+
+    const userMessage: Message = {
+      role: 'user',
+      content: agentInput,
+      timestamp: new Date().toISOString()
+    };
+
+    setAgentMessages(prev => [...prev, userMessage]);
+    const currentInput = agentInput;
+    setAgentInput('');
+    setAgentLoading(true);
 
     try {
-      setUploadingFile(true);
-      const formData = new FormData();
-      formData.append('pdf', selectedFile);
-      formData.append('strategy', 'user');
-
-      const response = await fetch(`${API_URL}/upload/pdf`, {
+      const response = await fetch(`${API_BASE}/agent/shipping/message`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          threadId: agentThreadId,
+          message: currentInput
+        })
+      });
+
+      const data: AgentResponse = await response.json();
+
+      if (data.success) {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date().toISOString()
+        };
+
+        setAgentMessages(prev => [...prev, assistantMessage]);
+        setCurrentPhase(data.currentPhase);
+        setShipmentData(data.shipmentData);
+        
+        if (data.quote) {
+          setQuote(data.quote);
+        }
+
+        if (data.invoices) {
+          setSessionInvoices(data.invoices);
+        }
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Failed to send message', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to send message', severity: 'error' });
+    } finally {
+      setAgentLoading(false);
+    }
+  };
+
+  const handleDocumentUpload = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    if (!file || !token) return;
+
+    setDocumentUploading(true);
+    const formData = new FormData();
+    formData.append('pdf', file);
+
+    try {
+      const response = await fetch(`${API_BASE}/upload/pdf`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
         body: formData
       });
 
       const data = await response.json();
+
       if (response.ok) {
-        const uploadedDoc = { 
-          filename: data.filename, 
-          uploadedAt: new Date().toISOString(),
-          documentId: data.documentId 
-        };
-        setDocuments(prev => [...prev, uploadedDoc]);
-        
-        // Add system message about upload
-        setMessages(prev => [
-          ...prev,
-          { 
-            role: 'assistant', 
-            content: `✓ Perfect! I've analyzed your document "${data.filename}". This will help me provide more accurate quotes. Let me continue gathering the remaining details...`, 
-            timestamp: new Date().toISOString(),
-            attachments: [uploadedDoc]
-          }
-        ]);
-        
-        setSelectedFile(null);
-        setShowUploadUI(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      } else {
-        alert(data.error || 'Upload failed');
-      }
-    } catch {
-      alert('Upload failed');
-    } finally {
-      setUploadingFile(false);
-    }
-  };
-
-  const continueAfterUpload = async () => {
-    if (!threadId) return;
-    
-    try {
-      const response = await fetch(`${API_URL}/agent/shipping/message`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          threadId, 
-          message: '[DOCUMENT_UPLOADED]',
-          hasDocument: true 
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok && data.message) {
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: data.message, 
-          timestamp: new Date().toISOString() 
-        }]);
-        if (data.currentPhase) setCurrentPhase(data.currentPhase);
-        if (data.shipmentData) setShipmentData(data.shipmentData);
-      }
-    } catch (err) {
-      console.error('Continue after upload error:', err);
-    }
-  };
-
-  const sendMessage = async () => {
-    if (!input.trim() || !threadId) return;
-
-    const userMessage: Message = { 
-      role: 'user', 
-      content: input, 
-      timestamp: new Date().toISOString() 
-    };
-    
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_URL}/agent/shipping/message`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          threadId, 
-          message: input,
-          hasDocument: documents.length > 0
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        const assistantMessage: Message = { 
-          role: 'assistant', 
-          content: data.message, 
-          timestamp: new Date().toISOString() 
-        };
-
-        // Check if we should show upload prompt
-        if (data.currentPhase === 'cargo_collection' || data.currentPhase === 'finalizing') {
-          if (documents.length === 0) {
-            assistantMessage.showUploadPrompt = true;
-            setShowUploadUI(true);
-          }
+        setSnackbar({ open: true, message: 'Document uploaded successfully', severity: 'success' });
+        fetchUserDocuments(token);
+        if (user) {
+          setTimeout(() => fetchRedisData(user.userId), 2000);
         }
-
-        setMessages(prev => [...prev, assistantMessage]);
-        if (data.currentPhase) setCurrentPhase(data.currentPhase);
-        if (data.shipmentData) setShipmentData(data.shipmentData);
       } else {
-        alert(data.error || 'Failed to send message');
+        setSnackbar({ open: true, message: data.error || 'Upload failed', severity: 'error' });
       }
-    } catch {
-      alert('Failed to send message');
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Upload failed', severity: 'error' });
     } finally {
-      setLoading(false);
+      setDocumentUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const skipUpload = () => {
-    setShowUploadUI(false);
-    setMessages(prev => [
-      ...prev,
-      { 
-        role: 'assistant', 
-        content: "No problem! I'll proceed with the information you've provided.", 
-        timestamp: new Date().toISOString() 
+  const handleDocumentChat = async (): Promise<void> => {
+    if (!documentChatInput.trim() || !token) return;
+
+    setDocumentChatLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/chat/documents?message=${encodeURIComponent(documentChatInput)}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setDocumentChatResponse(data.message);
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Chat failed', severity: 'error' });
       }
-    ]);
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Chat failed', severity: 'error' });
+    } finally {
+      setDocumentChatLoading(false);
+    }
   };
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border border-indigo-100">
-          <div className="text-center mb-8">
-            <div className="bg-gradient-to-br from-indigo-600 to-purple-600 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Package className="w-10 h-10 text-white" />
-            </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">FreightChat Pro</h1>
-            <p className="text-gray-600">AI-Powered Shipping Intelligence</p>
-          </div>
-          <div className="space-y-4">
-            <input 
-              type="text" 
-              placeholder="User ID" 
-              value={userId} 
-              onChange={(e) => setUserId(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-            />
-            <input 
-              type="text" 
-              placeholder="Name (optional for register)" 
-              value={userName} 
-              onChange={(e) => setUserName(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-            />
-            <div className="flex gap-3">
-              <button 
-                onClick={() => handleAuth(true)} 
-                className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white py-3 rounded-xl hover:from-indigo-700 hover:to-indigo-800 transition-all shadow-md hover:shadow-lg font-medium"
-              >
-                Login
-              </button>
-              <button 
-                onClick={() => handleAuth(false)} 
-                className="flex-1 bg-gray-600 text-white py-3 rounded-xl hover:bg-gray-700 transition-all shadow-md hover:shadow-lg font-medium"
-              >
-                Register
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  const handleInvoiceUpload = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    if (!file || !token || !agentThreadId) return;
+
+    setInvoiceUploading(true);
+    const formData = new FormData();
+    formData.append('invoice', file);
+    formData.append('threadId', agentThreadId);
+
+    try {
+      const response = await fetch(`${API_BASE}/agent/shipping/upload-invoice`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSnackbar({ open: true, message: 'Invoice uploaded successfully', severity: 'success' });
+        
+        const systemMessage: Message = {
+          role: 'system',
+          content: `Invoice uploaded: ${file.name}`,
+          timestamp: new Date().toISOString()
+        };
+        setAgentMessages(prev => [...prev, systemMessage]);
+
+        fetchSessionInvoices();
+        if (user) {
+          setTimeout(() => fetchRedisData(user.userId), 2000);
+        }
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Invoice upload failed', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Invoice upload failed', severity: 'error' });
+    } finally {
+      setInvoiceUploading(false);
+      if (invoiceInputRef.current) invoiceInputRef.current.value = '';
+    }
+  };
+
+  const fetchSessionInvoices = async (): Promise<void> => {
+    if (!agentThreadId || !token) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/agent/shipping/invoices/${agentThreadId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setSessionInvoices(data.invoices);
+      }
+    } catch (error) {
+      console.error('Failed to fetch invoices:', error);
+    }
+  };
+
+  const handleTrackShipment = async (): Promise<void> => {
+    if (!trackingNumber.trim()) return;
+
+    setTrackingLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/track/${trackingNumber}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setTrackingInfo(data);
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Tracking failed', severity: 'error' });
+        setTrackingInfo(null);
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Tracking failed', severity: 'error' });
+      setTrackingInfo(null);
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const handleBookShipment = async (carrierId: string, serviceLevel: string): Promise<void> => {
+    if (!token || !agentThreadId) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/agent/shipping/book`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          threadId: agentThreadId,
+          carrierId,
+          serviceLevel
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSnackbar({ 
+          open: true, 
+          message: `Shipment booked! Tracking: ${data.trackingNumber}`, 
+          severity: 'success' 
+        });
+        
+        const bookingMessage: Message = {
+          role: 'assistant',
+          content: `Shipment booked successfully!\n\nBooking ID: ${data.bookingId}\nTracking: ${data.trackingNumber}\nEstimated Delivery: ${new Date(data.estimatedDelivery).toLocaleDateString()}`,
+          timestamp: new Date().toISOString()
+        };
+        setAgentMessages(prev => [...prev, bookingMessage]);
+
+        fetchUserShipments(token);
+      } else {
+        setSnackbar({ open: true, message: data.error || 'Booking failed', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Booking failed', severity: 'error' });
+    }
+  };
+
+  const handleAuthDataChange = (field: keyof AuthData) => (event: ChangeEvent<HTMLInputElement>) => {
+    setAuthData(prev => ({
+      ...prev,
+      [field]: event.target.value
+    }));
+  };
+
+  const handleTabChange = (_: SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
+  };
+
+  const handleAgentInputKeyPress = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendAgentMessage();
+    }
+  };
+
+  // Render nothing until mounted to avoid hydration mismatch
+  if (!mounted) {
+    return null;
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-600 to-purple-600 p-2 rounded-xl shadow-md">
-              <Package className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">FreightChat Pro</h1>
-              <p className="text-xs text-gray-600">AI Agent • Phase: {currentPhase || 'Ready'}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {documents.length > 0 && (
-              <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200">
-                <FileCheck className="w-4 h-4" />
-                <span>{documents.length} doc(s)</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2 text-sm text-gray-700 bg-gray-50 px-4 py-2 rounded-lg">
-              <User className="w-4 h-4 text-indigo-600" />
-              <span className="font-medium">{userName}</span>
-            </div>
-            <button 
-              onClick={handleLogout} 
-              className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-            >
-              <LogOut className="w-4 h-4" /> Logout
-            </button>
-          </div>
-        </div>
-      </header>
+  const renderRedisData = () => (
+    <Box>
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StorageIcon color="primary" />
+            <Typography variant="h6">
+              Redis Data Storage
+            </Typography>
+          </Box>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={refreshRedisData}
+            disabled={redisLoading}
+            size="small"
+          >
+            Refresh
+          </Button>
+        </Box>
+        
+        {redisLoading && <LinearProgress sx={{ mb: 2 }} />}
 
-      <main className="max-w-4xl mx-auto p-4">
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-          {!threadId ? (
-            <div className="p-12 text-center">
-              <div className="bg-gradient-to-br from-indigo-100 to-purple-100 w-24 h-24 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <Package className="w-12 h-12 text-indigo-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Ready to Ship?</h2>
-              <p className="text-gray-600 mb-6">Start a conversation with our AI agent to get instant freight quotes</p>
-              <button 
-                onClick={startShippingSession} 
-                disabled={loading}
-                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-8 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all font-medium"
-              >
-                {loading ? 'Starting...' : 'Start Shipping Session'}
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Messages Area */}
-              <div className="h-[500px] overflow-y-auto p-6 bg-gradient-to-b from-gray-50 to-white">
-                {messages.map((msg, i) => (
-                  <div key={i}>
-                    <div className={`mb-4 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-2' : 'order-1'}`}>
-                        <div className={`px-5 py-3 rounded-2xl shadow-md ${
-                          msg.role === 'user' 
-                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white' 
-                            : 'bg-white border border-gray-200 text-gray-800'
-                        }`}>
-                          <div className="whitespace-pre-wrap">{msg.content}</div>
-                          {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-gray-300 flex items-center gap-2 text-sm opacity-90">
-                              <FileText className="w-4 h-4" />
-                              <span>{msg.attachments[0].filename}</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className={`text-xs text-gray-500 mt-1 px-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                          {new Date(msg.timestamp).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Upload Prompt Card - Shows right after certain assistant messages */}
-                    {msg.role === 'assistant' && msg.showUploadPrompt && showUploadUI && (
-                      <div className="mb-4 flex justify-start">
-                        <div className="max-w-[85%] bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-5 shadow-lg">
-                          <div className="flex items-start gap-3 mb-4">
-                            <div className="bg-blue-600 p-2 rounded-lg">
-                              <Upload className="w-5 h-5 text-white" />
-                            </div>
-                            <div className="flex-1">
-                              <h3 className="font-bold text-gray-900 mb-1">Upload Invoice or Bill of Lading</h3>
-                              <p className="text-sm text-gray-700 mb-3">
-                                For more accurate quotes, you can upload your shipping documents (invoice, commercial invoice, packing list, or bill of lading). The AI will extract details automatically.
-                              </p>
-                              
-                              {!selectedFile ? (
-                                <div className="space-y-3">
-                                  <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                                    accept="application/pdf"
-                                    className="hidden"
-                                  />
-                                  <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2 font-medium"
-                                  >
-                                    <Paperclip className="w-5 h-5" />
-                                    Choose Document (PDF)
-                                  </button>
-                                  <button
-                                    onClick={skipUpload}
-                                    className="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-all text-sm"
-                                  >
-                                    Skip - Continue without document
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="bg-white rounded-lg p-3 border border-blue-200">
-                                  <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2 flex-1">
-                                      <FileText className="w-5 h-5 text-blue-600" />
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-gray-900 truncate">{selectedFile.name}</p>
-                                        <p className="text-xs text-gray-600">{(selectedFile.size / 1024).toFixed(2)} KB</p>
-                                      </div>
-                                    </div>
-                                    <button 
-                                      onClick={() => {
-                                        setSelectedFile(null);
-                                        if (fileInputRef.current) fileInputRef.current.value = '';
-                                      }}
-                                      className="p-1 text-gray-500 hover:bg-gray-100 rounded"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button 
-                                      onClick={handleFileUpload} 
-                                      disabled={uploadingFile}
-                                      className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium transition-all flex items-center justify-center gap-2"
-                                    >
-                                      {uploadingFile ? (
-                                        <>
-                                          <Loader2 className="w-4 h-4 animate-spin" />
-                                          Analyzing...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Upload className="w-4 h-4" />
-                                          Upload & Analyze
-                                        </>
-                                      )}
-                                    </button>
-                                    <button
-                                      onClick={skipUpload}
-                                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
-                                    >
-                                      Skip
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Real-time data from Upstash Redis. This shows all processed documents and invoices.
+        </Alert>
+      </Paper>
+
+     <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+  <Box sx={{ flex: '1 1 45%', minWidth: '300px' }}>
+    <Paper sx={{ p: 2 }}>
+      <Typography variant="h6" gutterBottom>
+        <Badge badgeContent={redisInvoices.length} color="primary">
+          Invoices in Redis
+        </Badge>
+      </Typography>
+      
+      {redisInvoices.length > 0 ? (
+        <List>
+          {redisInvoices.map((invoice) => (
+            <Card key={invoice.invoiceId} sx={{ mb: 2 }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 1 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="subtitle1" fontWeight="bold">
+                      {invoice.filename}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Type: {invoice.documentType}
+                    </Typography>
+                    {invoice.invoiceNumber && (
+                      <Typography variant="body2" color="text.secondary">
+                        Invoice #: {invoice.invoiceNumber}
+                      </Typography>
                     )}
-                  </div>
-                ))}
-                {loading && (
-                  <div className="flex justify-start mb-4">
-                    <div className="bg-white border border-gray-200 px-5 py-3 rounded-2xl shadow-md">
-                      <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                    </div>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
+                    {invoice.totalAmount && (
+                      <Typography variant="body2" color="primary" fontWeight="bold">
+                        {invoice.currency} {invoice.totalAmount}
+                      </Typography>
+                    )}
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(invoice.processedAt).toLocaleString()}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    {invoice.readyForBooking && (
+                      <Chip 
+                        label="Ready" 
+                        color="success" 
+                        size="small" 
+                        sx={{ mb: 1 }}
+                      />
+                    )}
+                    <IconButton
+                      size="small"
+                      onClick={() => fetchInvoiceDetails(invoice.invoiceId)}
+                      color="primary"
+                    >
+                      <VisibilityIcon />
+                    </IconButton>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          ))}
+        </List>
+      ) : (
+        <Alert severity="info">
+          No invoices in Redis yet. Upload an invoice to see it here.
+        </Alert>
+      )}
+    </Paper>
+  </Box>
 
-              {/* Input Area */}
-              <div className="p-4 bg-white border-t border-gray-200">
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={input} 
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                    placeholder="Type your message..."
-                    disabled={showUploadUI && !selectedFile}
-                    className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all disabled:bg-gray-50 disabled:text-gray-500"
-                  />
-                  <button 
-                    onClick={sendMessage} 
-                    disabled={loading || !input.trim() || (showUploadUI && !selectedFile)}
-                    className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-2 shadow-md hover:shadow-lg transition-all flex-shrink-0"
+  <Box sx={{ flex: '1 1 45%', minWidth: '300px' }}>
+    <Paper sx={{ p: 2 }}>
+      <Typography variant="h6" gutterBottom>
+        <Badge badgeContent={redisDocuments.length} color="primary">
+          Documents in Redis
+        </Badge>
+      </Typography>
+      
+      {redisDocuments.length > 0 ? (
+        <List>
+          {redisDocuments.map((doc) => (
+            <Card key={doc.documentId} sx={{ mb: 2 }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="subtitle1" fontWeight="bold">
+                      {doc.filename}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Type: {doc.documentType}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(doc.processedAt).toLocaleString()}
+                    </Typography>
+                  </Box>
+                  <IconButton
+                    size="small"
+                    onClick={() => fetchDocumentDetails(doc.documentId)}
+                    color="primary"
                   >
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
+                    <VisibilityIcon />
+                  </IconButton>
+                </Box>
+              </CardContent>
+            </Card>
+          ))}
+        </List>
+      ) : (
+        <Alert severity="info">
+          No documents in Redis yet. Upload a PDF to see it here.
+        </Alert>
+      )}
+    </Paper>
+  </Box>
+</Box>
+      <Dialog 
+        open={invoiceDialogOpen} 
+        onClose={() => setInvoiceDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Invoice Details from Redis</DialogTitle>
+        <DialogContent>
+          {selectedInvoiceData && (
+            <Box sx={{ mt: 2 }}>
+              <Accordion defaultExpanded>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography fontWeight="bold">Basic Information</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Table size="small">
+                    <TableBody>
+                      <TableRow>
+                        <TableCell><strong>Filename</strong></TableCell>
+                        <TableCell>{selectedInvoiceData.filename}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell><strong>File Size</strong></TableCell>
+                        <TableCell>{(selectedInvoiceData.fileSize / 1024).toFixed(2)} KB</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell><strong>Pages</strong></TableCell>
+                        <TableCell>{selectedInvoiceData.totalPages}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </AccordionDetails>
+              </Accordion>
+
+              {selectedInvoiceData.analysis && (
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography fontWeight="bold">Financial Details</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Table size="small">
+                      <TableBody>
+                        {selectedInvoiceData.analysis.financials?.totalAmount && (
+                          <TableRow>
+                            <TableCell><strong>Total Amount</strong></TableCell>
+                            <TableCell>
+                              {selectedInvoiceData.analysis.financials.currency} {selectedInvoiceData.analysis.financials.totalAmount}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {selectedInvoiceData.analysis.validation && (
+                          <TableRow>
+                            <TableCell><strong>Ready for Booking</strong></TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={selectedInvoiceData.analysis.validation.readyForBooking ? 'Yes' : 'No'}
+                                color={selectedInvoiceData.analysis.validation.readyForBooking ? 'success' : 'warning'}
+                                size="small"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInvoiceDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog 
+        open={documentDialogOpen} 
+        onClose={() => setDocumentDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Document Details from Redis</DialogTitle>
+        <DialogContent>
+          {selectedDocumentData && (
+            <Box sx={{ mt: 2 }}>
+              <Accordion defaultExpanded>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography fontWeight="bold">Basic Information</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Table size="small">
+                    <TableBody>
+                      <TableRow>
+                        <TableCell><strong>Filename</strong></TableCell>
+                        <TableCell>{selectedDocumentData.filename}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell><strong>Collection</strong></TableCell>
+                        <TableCell>{selectedDocumentData.collectionName}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell><strong>Chunks</strong></TableCell>
+                        <TableCell>{selectedDocumentData.totalChunks}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </AccordionDetails>
+              </Accordion>
+
+              {selectedDocumentData.aiAnalysis && (
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography fontWeight="bold">AI Analysis</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Typography variant="body2">
+                      <strong>Type:</strong> {selectedDocumentData.aiAnalysis.documentType}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Confidence:</strong> {(selectedDocumentData.aiAnalysis.confidence * 100).toFixed(0)}%
+                    </Typography>
+                    {selectedDocumentData.aiAnalysis.summary && (
+                      <Typography variant="body2" sx={{ mt: 1 }}>
+                        <strong>Summary:</strong> {selectedDocumentData.aiAnalysis.summary}
+                      </Typography>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDocumentDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+
+  const renderAgentChat = () => (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Paper sx={{ p: 2, mb: 2, bgcolor: 'primary.main', color: 'white' }}>
+        <Typography variant="h6" gutterBottom>AI Shipping Agent</Typography>
+        <Typography variant="body2">
+          {currentPhase === 'greeting' && 'Ready to help with your shipment'}
+          {currentPhase === 'route_collection' && 'Tell me about your shipment route'}
+          {currentPhase === 'cargo_collection' && 'Tell me about your cargo'}
+          {currentPhase === 'ready_for_quote' && 'Ready to generate quotes'}
+          {currentPhase === 'quote_generated' && 'Quotes generated - ready to book'}
+        </Typography>
+      </Paper>
+
+      <Paper sx={{ flex: 1, p: 2, mb: 2, overflow: 'auto', maxHeight: '400px', bgcolor: 'grey.50' }}>
+        {agentMessages.map((message, index) => (
+          <Box key={index} sx={{ display: 'flex', justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start', mb: 2 }}>
+            <Paper sx={{ p: 2, maxWidth: '70%', bgcolor: message.role === 'user' ? 'primary.main' : message.role === 'system' ? 'warning.light' : 'white', color: message.role === 'user' ? 'white' : 'text.primary' }}>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{message.content}</Typography>
+              <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 1 }}>
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </Typography>
+            </Paper>
+          </Box>
+        ))}
+        {agentLoading && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
+            <Paper sx={{ p: 2 }}><CircularProgress size={20} /></Paper>
+          </Box>
+        )}
+        <div ref={messagesEndRef} />
+      </Paper>
+
+      {quote && (
+        <Paper sx={{ p: 2, mb: 2, bgcolor: 'success.light' }}>
+          <Typography variant="h6" gutterBottom>Shipping Quotes</Typography>
+          {quote.quotes.map((q: Quote, index: number) => (
+            <Card key={q.carrierId} sx={{ mb: 1 }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="h6">{index + 1}. {q.name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{q.transitTime} • {q.reliability} reliable</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'right' }}>
+                    <Typography variant="h6" color="primary">${q.rate}</Typography>
+                    <Button variant="contained" size="small" onClick={() => handleBookShipment(q.carrierId, q.service)}>Book Now</Button>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          ))}
+        </Paper>
+      )}
+
+      {agentThreadId && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="h6" gutterBottom>Upload Invoice</Typography>
+          <input type="file" accept=".pdf" ref={invoiceInputRef} onChange={handleInvoiceUpload} style={{ display: 'none' }} />
+          <Button variant="outlined" startIcon={<UploadIcon />} onClick={() => invoiceInputRef.current?.click()} disabled={invoiceUploading} fullWidth>
+            {invoiceUploading ? 'Uploading...' : 'Upload Invoice PDF'}
+          </Button>
+          {sessionInvoices.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2">Uploaded Invoices:</Typography>
+              {sessionInvoices.map(invoice => (
+                <Chip key={invoice.invoiceId} label={invoice.filename} variant="outlined" size="small" sx={{ m: 0.5 }} icon={invoice.processed ? <CheckCircleIcon /> : undefined} />
+              ))}
+            </Box>
+          )}
+        </Paper>
+      )}
+
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <TextField fullWidth variant="outlined" placeholder="Type your message..." value={agentInput} onChange={(e) => setAgentInput(e.target.value)} onKeyPress={handleAgentInputKeyPress} disabled={agentLoading || !agentThreadId} multiline maxRows={4} />
+        <Button variant="contained" onClick={sendAgentMessage} disabled={agentLoading || !agentInput.trim() || !agentThreadId}>
+          <SendIcon />
+        </Button>
+      </Box>
+
+      {!agentThreadId && (
+        <Button variant="contained" size="large" onClick={startAgent} disabled={agentLoading} startIcon={<ChatIcon />} sx={{ mt: 2 }}>
+          {agentLoading ? 'Starting Agent...' : 'Start Shipping Agent'}
+        </Button>
+      )}
+    </Box>
+  );
+
+  const renderDocumentChat = () => (
+    <Box>
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Typography variant="h6" gutterBottom>Document Management</Typography>
+        <input type="file" accept=".pdf" ref={fileInputRef} onChange={handleDocumentUpload} style={{ display: 'none' }} />
+        <Button variant="contained" startIcon={<CloudUploadIcon />} onClick={() => fileInputRef.current?.click()} disabled={documentUploading} sx={{ mb: 2 }}>
+          {documentUploading ? 'Uploading...' : 'Upload PDF Document'}
+        </Button>
+
+        {documents.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom>Your Documents ({documents.length})</Typography>
+            <List>
+              {documents.map(doc => (
+                <ListItem key={doc.document_id}>
+                  <ListItemIcon><DocumentIcon /></ListItemIcon>
+                  <ListItemText primary={doc.filename} secondary={`Uploaded ${new Date(doc.uploaded_at).toLocaleDateString()}`} />
+                  <Chip label={doc.strategy} size="small" />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        ) : (
+          <Alert severity="info">No documents uploaded yet. Upload a PDF to start chatting with your documents.</Alert>
+        )}
+      </Paper>
+
+      {documents.length > 0 && (
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="h6" gutterBottom>Chat with Documents</Typography>
+          <TextField fullWidth variant="outlined" placeholder="Ask a question about your documents..." value={documentChatInput} onChange={(e) => setDocumentChatInput(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') handleDocumentChat(); }} disabled={documentChatLoading} sx={{ mb: 2 }} />
+          <Button variant="contained" onClick={handleDocumentChat} disabled={documentChatLoading || !documentChatInput.trim()} fullWidth>
+            {documentChatLoading ? 'Thinking...' : 'Ask Question'}
+          </Button>
+
+          {documentChatResponse && (
+            <Paper sx={{ p: 2, mt: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{documentChatResponse}</Typography>
+            </Paper>
+          )}
+        </Paper>
+      )}
+    </Box>
+  );
+
+  const renderTracking = () => (
+    <Box>
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Typography variant="h6" gutterBottom>Track Shipment</Typography>
+        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+          <TextField fullWidth variant="outlined" placeholder="Enter tracking number..." value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} onKeyPress={(e) => { if (e.key === 'Enter') handleTrackShipment(); }} />
+          <Button variant="contained" onClick={handleTrackShipment} disabled={trackingLoading || !trackingNumber.trim()}>
+            {trackingLoading ? <CircularProgress size={24} /> : 'Track'}
+          </Button>
+        </Box>
+
+        {trackingInfo && (
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Tracking: {trackingInfo.trackingNumber}</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="body2" color="text.secondary">Status</Typography>
+                  <Typography variant="body1">{trackingInfo.status}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="body2" color="text.secondary">Estimated Delivery</Typography>
+                  <Typography variant="body1">{new Date(trackingInfo.estimatedDelivery).toLocaleDateString()}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="body2" color="text.secondary">Origin</Typography>
+                  <Typography variant="body1">{trackingInfo.origin}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="body2" color="text.secondary">Destination</Typography>
+                  <Typography variant="body1">{trackingInfo.destination}</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        )}
+      </Paper>
+
+      {user && (
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="h6" gutterBottom>Your Shipments</Typography>
+          {userShipments.length > 0 ? (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Tracking #</TableCell>
+                    <TableCell>Route</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Created</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {userShipments.map(shipment => (
+                    <TableRow key={shipment.tracking_number}>
+                      <TableCell>{shipment.tracking_number}</TableCell>
+                      <TableCell>{shipment.origin} → {shipment.destination}</TableCell>
+                      <TableCell>
+                        <Chip label={shipment.status} size="small" color={shipment.status === 'delivered' ? 'success' : shipment.status === 'pickup_scheduled' ? 'primary' : 'default'} />
+                      </TableCell>
+                      <TableCell>{new Date(shipment.created_at).toLocaleDateString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Alert severity="info">No shipments found. Start a conversation with the AI agent to book your first shipment!</Alert>
+          )}
+        </Paper>
+      )}
+    </Box>
+  );
+
+  const renderDashboard = () => (
+    <Box>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
+        {[
+          { label: 'Documents', value: documents.length },
+          { label: 'Active Shipments', value: userShipments.filter(s => !['delivered', 'returned'].includes(s.status)).length },
+          { label: 'Redis Invoices', value: redisInvoices.length },
+          { label: 'Redis Documents', value: redisDocuments.length }
+        ].map((stat, idx) => (
+          <Box key={idx} sx={{ flex: '1 1 200px' }}>
+            <Card><CardContent><Typography color="textSecondary" gutterBottom>{stat.label}</Typography><Typography variant="h4">{stat.value}</Typography></CardContent></Card>
+          </Box>
+        ))}
+      </Box>
+
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Quick Actions</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+            {[
+              { icon: <ChatIcon />, label: 'Start Shipping Agent', action: () => { setActiveTab(0); if (!agentThreadId) startAgent(); } },
+              { icon: <UploadIcon />, label: 'Upload Document', action: () => fileInputRef.current?.click() },
+              { icon: <TrackIcon />, label: 'Track Shipment', action: () => setActiveTab(2) },
+              { icon: <StorageIcon />, label: 'View Redis Data', action: () => setActiveTab(4) }
+            ].map((action, idx) => (
+              <Box key={idx} sx={{ flex: '1 1 200px' }}>
+                <Button variant={idx === 0 ? 'contained' : 'outlined'} fullWidth startIcon={action.icon} onClick={action.action} sx={{ height: '60px' }}>
+                  {action.label}
+                </Button>
+              </Box>
+            ))}
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ flexGrow: 1 }}>
+      <AppBar position="static">
+        <Toolbar>
+          <IconButton edge="start" color="inherit" onClick={() => setDrawerOpen(true)} sx={{ mr: 2 }}>
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>FreightChat Pro</Typography>
+          {user ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar sx={{ width: 32, height: 32 }}><PersonIcon /></Avatar>
+              <Typography variant="body2">{user.name}</Typography>
+              <IconButton color="inherit" onClick={handleLogout}><LogoutIcon /></IconButton>
+            </Box>
+          ) : (
+            <Button color="inherit" onClick={() => setAuthDialogOpen(true)}>Login</Button>
+          )}
+        </Toolbar>
+      </AppBar>
+
+      <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <Box sx={{ width: 250 }}>
+          <Toolbar><Typography variant="h6">Navigation</Typography></Toolbar>
+          <Divider />
+          <List>
+            {[
+              { icon: <ChatIcon />, label: 'AI Shipping Agent', idx: 0 },
+              { icon: <DocumentIcon />, label: 'Documents', idx: 1 },
+              { icon: <TrackIcon />, label: 'Tracking', idx: 2 },
+              { icon: <DashboardIcon />, label: 'Dashboard', idx: 3 },
+              { icon: <StorageIcon />, label: 'Redis Data', idx: 4, badge: redisInvoices.length + redisDocuments.length }
+            ].map((item) => (
+              <ListItemButton key={item.idx} selected={activeTab === item.idx} onClick={() => { setActiveTab(item.idx); setDrawerOpen(false); }}>
+                <ListItemIcon>{item.icon}</ListItemIcon>
+                <ListItemText primary={item.label} />
+                {item.badge !== undefined && <Badge badgeContent={item.badge} color="primary" />}
+              </ListItemButton>
+            ))}
+          </List>
+        </Box>
+      </Drawer>
+
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        {user ? (
+          <>
+            <Paper sx={{ mb: 2 }}>
+              <Tabs value={activeTab} onChange={handleTabChange} variant="fullWidth">
+                <Tab icon={<ChatIcon />} label="AI Agent" />
+                <Tab icon={<DocumentIcon />} label="Documents" />
+                <Tab icon={<TrackIcon />} label="Tracking" />
+                <Tab icon={<DashboardIcon />} label="Dashboard" />
+                <Tab icon={<Badge badgeContent={redisInvoices.length + redisDocuments.length} color="primary"><StorageIcon /></Badge>} label="Redis Data" />
+              </Tabs>
+            </Paper>
+
+            {activeTab === 0 && renderAgentChat()}
+            {activeTab === 1 && renderDocumentChat()}
+            {activeTab === 2 && renderTracking()}
+            {activeTab === 3 && renderDashboard()}
+            {activeTab === 4 && renderRedisData()}
+          </>
+        ) : (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h3" gutterBottom color="primary">FreightChat Pro</Typography>
+            <Typography variant="h5" gutterBottom>AI-Powered Shipping & Logistics</Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+              Intelligent document processing, real-time tracking, and AI-powered shipping assistance with Redis data storage
+            </Typography>
+            <Button variant="contained" size="large" onClick={() => setAuthDialogOpen(true)} sx={{ mt: 4 }}>
+              Get Started - Login / Register
+            </Button>
+          </Paper>
+        )}
+      </Container>
+
+      <Dialog open={authDialogOpen} onClose={() => setAuthDialogOpen(false)}>
+        <DialogTitle>{isLogin ? 'Login to FreightChat Pro' : 'Create Account'}</DialogTitle>
+        <DialogContent>
+          <TextField autoFocus margin="dense" label="User ID" type="text" fullWidth variant="outlined" value={authData.userId} onChange={handleAuthDataChange('userId')} sx={{ mb: 2 }} />
+          {!isLogin && (
+            <>
+              <TextField margin="dense" label="Full Name" type="text" fullWidth variant="outlined" value={authData.name} onChange={handleAuthDataChange('name')} sx={{ mb: 2 }} />
+              <TextField margin="dense" label="Email" type="email" fullWidth variant="outlined" value={authData.email} onChange={handleAuthDataChange('email')} sx={{ mb: 2 }} />
             </>
           )}
-        </div>
-      </main>
-    </div>
+          <Typography variant="body2" color="text.secondary">
+            {isLogin ? "Don't have an account? " : "Already have an account? "}
+            <Button size="small" onClick={() => setIsLogin(!isLogin)}>{isLogin ? 'Register' : 'Login'}</Button>
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAuthDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleAuth} variant="contained" disabled={loading || !authData.userId.trim()}>
+            {loading ? 'Please wait...' : (isLogin ? 'Login' : 'Register')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+
+      {user && !agentThreadId && activeTab !== 0 && (
+        <Fab color="primary" onClick={startAgent} sx={{ position: 'fixed', bottom: 16, right: 16 }}>
+          <ChatIcon />
+        </Fab>
+      )}
+    </Box>
   );
 }
